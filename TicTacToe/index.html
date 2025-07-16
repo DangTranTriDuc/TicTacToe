@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Tic Tac Toe</title>
+    <style>
+        body {
+            background: #f0f2f5;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding-top: 30px;
+        }
+
+        h1 {
+            color: #333;
+            font-size: 3rem;
+            margin-bottom: 10px;
+        }
+
+        #status {
+            font-size: 1.4rem;
+            color: #555;
+            margin-bottom: 10px;
+        }
+
+        #scoreboard {
+            font-size: 1.2rem;
+            margin-bottom: 5px;
+            background: #fff;
+            padding: 10px 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        #turn-info {
+            font-size: 1.2rem;
+            margin-bottom: 10px;
+        }
+
+        #board {
+            display: grid;
+            grid-template-columns: repeat(3, 100px);
+            grid-template-rows: repeat(3, 100px);
+            gap: 8px;
+            background-color: #ccc;
+            padding: 8px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .cell {
+            background: #fff;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .cell:hover {
+            background: #e3e3e3;
+        }
+
+        .x {
+            color: #e74c3c;
+        }
+
+        .o {
+            color: #3498db;
+        }
+
+        #overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.6);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        #message-box {
+            background: white;
+            padding: 40px 60px;
+            border-radius: 15px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+            font-size: 2rem;
+            font-weight: bold;
+            text-align: center;
+            animation: popin 0.3s ease-out;
+        }
+
+        @keyframes popin {
+            from {
+                transform: scale(0.8);
+                opacity: 0;
+            }
+            to {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        .win-x {
+            background-color: #f8d7da !important;
+        }
+
+        .win-o {
+            background-color: #d0eaff !important;
+        }
+
+        #countdown {
+            font-size: 1.2rem;
+            color: orange;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+<h1>Tic Tac Toe</h1>
+<p id="status">Đang kết nối...</p>
+
+<div id="scoreboard">
+    <span class="x">X: <span id="score-x">0</span></span> |
+    <span class="o">O: <span id="score-o">0</span></span>
+</div>
+
+<p id="turn-info"></p>
+<div id="countdown"></div>
+<div id="board"></div>
+
+<div id="overlay">
+    <div id="message-box"></div>
+</div>
+
+<audio id="tickSound" src="tick.mp3" preload="auto"></audio>
+
+<script>
+    const ws = new WebSocket("ws://localhost:8000/ws");
+    const boardEl = document.getElementById("board");
+    const statusEl = document.getElementById("status");
+    const overlay = document.getElementById("overlay");
+    const messageBox = document.getElementById("message-box");
+    const scoreboard = document.getElementById("scoreboard");
+    const countdownEl = document.getElementById("countdown");
+    const turnInfo = document.getElementById("turn-info");
+    const tickSound = document.getElementById("tickSound");
+    document.addEventListener("click", () => {
+        tickSound.play().then(() => {
+            tickSound.pause();
+            tickSound.currentTime = 0;
+            tickSound.load(); // Thêm dòng này để đảm bảo âm thanh sẵn sàng lại
+        }).catch(() => {
+        });
+    }, {once: true});
+
+    let playerSymbol = "";
+    let board = Array(9).fill("");
+    let scoreX = 0;
+    let scoreO = 0;
+    let countdownInterval = null;
+    let countdownTime = 10;
+
+
+    function renderBoard() {
+        boardEl.innerHTML = "";
+        for (let i = 0; i < 9; i++) {
+            const cell = document.createElement("div");
+            cell.classList.add("cell");
+
+            // ✅ Loại bỏ class win-x và win-o nếu có
+            cell.classList.remove("win-x", "win-o");
+
+            const mark = board[i];
+            if (mark === "X") cell.classList.add("x");
+            else if (mark === "O") cell.classList.add("o");
+
+            cell.textContent = mark;
+            cell.dataset.index = i;
+
+            cell.addEventListener("click", () => {
+                if (board[i] === "") {
+                    ws.send(JSON.stringify({type: "move", index: i}));
+                }
+            });
+
+            boardEl.appendChild(cell);
+        }
+    }
+
+    function updateScoreboard() {
+        document.getElementById("score-x").textContent = scoreX;
+        document.getElementById("score-o").textContent = scoreO;
+    }
+
+    function showOverlayMessage(message) {
+        messageBox.textContent = message;
+        overlay.style.display = "flex";
+        stopCountdown();
+
+        setTimeout(() => {
+            overlay.style.display = "none";
+            statusEl.textContent = `🎮 Bạn là người chơi: ${playerSymbol}`;
+            board = Array(9).fill("");         // ✅ Xóa dữ liệu client
+            renderBoard();                     // ✅ Reset giao diện
+            // ✅ Gửi tín hiệu yêu cầu reset sau khi overlay ẩn
+            ws.send(JSON.stringify({type: "reset"}));
+        }, 5000);
+    }
+
+    function startCountdown() {
+        clearInterval(countdownInterval);
+        countdownTime = 10;
+        countdownEl.textContent = `⏱ Còn lại: ${countdownTime}s`;
+
+        countdownInterval = setInterval(() => {
+            countdownTime--;
+            countdownEl.textContent = `⏱ Còn lại: ${countdownTime}s`;
+
+            if (countdownTime <= 3 && countdownTime > 0) {
+                tickSound.play();
+            }
+
+            if (countdownTime <= 0) {
+                clearInterval(countdownInterval);
+                handleLoseByTimeout();
+            }
+        }, 1000);
+    }
+
+    function stopCountdown() {
+        clearInterval(countdownInterval);
+        countdownEl.textContent = "";
+    }
+
+    function handleLoseByTimeout() {
+        showOverlayMessage("⏰ Hết giờ! Bạn đã thua.");
+        ws.send(JSON.stringify({type: "timeout"}));
+    }
+
+    ws.onopen = () => {
+        console.log("✅ WebSocket connected.");
+    };
+
+    ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+
+        if (msg.type === "assign") {
+            playerSymbol = msg.symbol;
+            statusEl.textContent = `🎮 Bạn là người chơi: ${playerSymbol}`;
+        } else if (msg.type === "board") {
+            board = msg.board;
+            renderBoard();
+
+            const xCount = board.filter(cell => cell === "X").length;
+            const oCount = board.filter(cell => cell === "O").length;
+            const currentTurn = xCount <= oCount ? "X" : "O";
+
+            // ✅ Hiển thị lượt hiện tại với màu sắc
+            if (currentTurn === "X") {
+                turnInfo.innerHTML = '👉 Đến lượt <span style="color: #e74c3c; font-weight: bold;">X</span>';
+            } else {
+                turnInfo.innerHTML = '👉 Đến lượt <span style="color: #3498db; font-weight: bold;">O</span>';
+            }
+
+            if (playerSymbol === currentTurn) {
+                startCountdown();
+            } else {
+                stopCountdown();
+            }
+        } else if (msg.type === "winner") {
+            let message;
+            if (msg.symbol === playerSymbol) {
+                message = `🎉 Bạn (${msg.symbol}) thắng!`;
+            } else {
+                message = `😢 Bạn đã thua. ${msg.symbol} thắng.`;
+            }
+
+            const winCells = msg.win_cells || [];
+            winCells.forEach(index => {
+                const cell = boardEl.children[index];
+                if (msg.symbol === "X") {
+                    cell.classList.add("win-x");
+                } else {
+                    cell.classList.add("win-o");
+                }
+            });
+
+            setTimeout(() => {
+                if (msg.symbol === "X") scoreX++;
+                if (msg.symbol === "O") scoreO++;
+                updateScoreboard();
+                showOverlayMessage(message);
+            }, 1000);
+        }
+    };
+</script>
+</body>
+</html>
+
